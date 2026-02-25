@@ -1,0 +1,5 @@
+{
+  "/api/batch-quotes/route": "app/api/batch-quotes/route.js",
+  "/api/stock-quote/[symbol]/route": "app/api/stock-quote/[symbol]/route.js",
+  "/page": "app/page.js"
+}
