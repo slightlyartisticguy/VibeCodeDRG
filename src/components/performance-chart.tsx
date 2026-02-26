@@ -29,14 +29,28 @@ interface PerformanceChartProps {
 }
 
 /**
- * Formats a date string based on the selected period.
+ * Formats a raw ISO date string for the X-axis tick label based on period.
+ * - 1M / 6M : daily granularity  — "Jan 15"
+ * - 1Y      : monthly labels    — "Jan '25"
+ * - ALL     : yearly labels     — "2021"
  */
-function formatDate(dateStr: string, period: TimePeriod): string {
-  const date = new Date(dateStr);
-  if (period === "1M") {
+function formatTickDate(dateStr: string, period: TimePeriod): string {
+  const date = new Date(dateStr + "T12:00:00");
+  if (period === "1M" || period === "6M") {
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
-  return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  if (period === "1Y") {
+    return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  }
+  return date.getFullYear().toString();
+}
+
+/**
+ * Formats a raw ISO date string for the tooltip (full human-readable date).
+ */
+function formatTooltipDate(dateStr: string): string {
+  const date = new Date(dateStr + "T12:00:00");
+  return date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
 /**
@@ -48,17 +62,27 @@ function ChartTooltip({
   label,
 }: {
   active?: boolean;
-  payload?: Array<{ value: number }>;
+  payload?: Array<{ value: number; payload: { startPrice: number } }>;
   label?: string;
 }) {
   if (!active || !payload?.length || !label) return null;
 
+  const price = payload[0].value;
+  const startPrice = payload[0].payload.startPrice;
+  const pctChange = startPrice ? ((price - startPrice) / startPrice) * 100 : null;
+  const isPositive = pctChange !== null && pctChange >= 0;
+
   return (
-    <div className="rounded-lg border border-slate-700 bg-[#1a1a1a] px-3 py-2 shadow-lg">
-      <p className="text-xs text-slate-400">{label}</p>
-      <p className="text-sm font-semibold text-emerald-400">
-        ${payload[0].value.toFixed(2)}
-      </p>
+    <div className="rounded-lg border border-slate-700 bg-[#1a1a1a] px-5 py-4 shadow-xl min-w-[200px]">
+      <p className="text-xl text-slate-300 mb-1">{formatTooltipDate(label)}</p>
+      <p className="text-2xl font-bold text-white">${price.toFixed(2)}</p>
+      {pctChange !== null && (
+        <p className={`text-lg font-semibold mt-1 ${
+          isPositive ? "text-emerald-400" : "text-red-400"
+        }`}>
+          {isPositive ? "+" : ""}{pctChange.toFixed(2)}% from period start
+        </p>
+      )}
     </div>
   );
 }
@@ -70,14 +94,62 @@ export function PerformanceChart({
   const [period, setPeriod] = useState<TimePeriod>("6M");
   const { data: historicalData, isLoading, error } = useHistoricalData(symbol, period);
 
+  // Keep rawDate as the XAxis dataKey so ticks can be computed precisely
+  // startPrice is embedded in each point so the tooltip can compute % change
   const chartData = useMemo(() => {
     if (!historicalData) return [];
+    const startPrice = historicalData[0]?.close ?? 0;
     return historicalData.map((d) => ({
-      date: formatDate(d.date, period),
       rawDate: d.date,
       price: d.close,
+      startPrice,
     }));
-  }, [historicalData, period]);
+  }, [historicalData]);
+
+  /** Y-axis domain fitted to the visible period with 5% padding */
+  const yDomain = useMemo((): [number, number] => {
+    if (chartData.length === 0) return [0, 0];
+    const prices = chartData.map((d) => d.price);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const pad = (max - min) * 0.05 || max * 0.01;
+    return [Math.floor(min - pad), Math.ceil(max + pad)];
+  }, [chartData]);
+
+  /**
+   * Compute which tick values (rawDate strings) to display on the X-axis:
+   * - 1M  : every 3rd trading day
+   * - 6M  : first trading day of each month
+   * - 1Y  : first trading day of each month (12 ticks)
+   * - ALL : first trading day of each calendar year
+   */
+  const xAxisTicks = useMemo(() => {
+    if (chartData.length === 0) return [];
+    if (period === "1M") {
+      return chartData
+        .filter((_, i) => i % 3 === 0 || i === chartData.length - 1)
+        .map((d) => d.rawDate);
+    }
+    if (period === "6M" || period === "1Y") {
+      const seen = new Set<string>();
+      return chartData
+        .filter((d) => {
+          const month = d.rawDate.substring(0, 7);
+          if (!seen.has(month)) { seen.add(month); return true; }
+          return false;
+        })
+        .map((d) => d.rawDate);
+    }
+    // ALL — one label per year
+    const seen = new Set<string>();
+    return chartData
+      .filter((d) => {
+        const year = d.rawDate.substring(0, 4);
+        if (!seen.has(year)) { seen.add(year); return true; }
+        return false;
+      })
+      .map((d) => d.rawDate);
+  }, [chartData, period]);
 
   const subtitle = useMemo(() => {
     const periodLabels: Record<TimePeriod, string> = {
@@ -94,18 +166,20 @@ export function PerformanceChart({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-slate-100">{title}</h2>
-            <p className="text-sm text-slate-400">{subtitle}</p>
+            <h2 className="text-3xl font-bold text-slate-100">{title}</h2>
+            <p className="text-lg text-slate-400">{subtitle}</p>
           </div>
-          <div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-[#1a1a1a] p-1">
+          <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-[#1a1a1a] p-1.5" role="group" aria-label="Select time period">
             {PERIODS.map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
-                className={`rounded-lg px-3 py-1 text-xs font-bold transition-colors ${
+                aria-pressed={period === p}
+                aria-label={`Show ${p} period`}
+                className={`rounded-lg px-5 py-2 text-lg font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   period === p
-                    ? "bg-blue-500 text-slate-100"
-                    : "text-slate-500 hover:text-slate-300"
+                    ? "bg-blue-500 text-white"
+                    : "text-slate-400 hover:text-slate-100"
                 }`}
               >
                 {p}
@@ -116,19 +190,20 @@ export function PerformanceChart({
       </CardHeader>
       <CardContent className="pt-4">
         {isLoading ? (
-          <div className="flex h-64 items-center justify-center">
+          <div className="flex h-96 items-center justify-center" role="status" aria-label="Loading chart data">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+            <span className="sr-only">Loading chart data…</span>
           </div>
         ) : error ? (
-          <div className="flex h-64 items-center justify-center text-sm text-red-400">
+          <div className="flex h-96 items-center justify-center text-sm text-red-400" role="alert">
             Failed to load chart data. The data source may be unavailable.
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+          <div className="flex h-96 items-center justify-center text-sm text-slate-400" role="status">
             No data available for {symbol}
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={256}>
+          <ResponsiveContainer width="100%" height={480}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
@@ -142,18 +217,21 @@ export function PerformanceChart({
                 vertical={false}
               />
               <XAxis
-                dataKey="date"
-                tick={{ fill: "#64748b", fontSize: 12, fontFamily: "monospace" }}
+                dataKey="rawDate"
+                ticks={xAxisTicks}
+                tickFormatter={(val: string) => formatTickDate(val, period)}
+                tick={{ fill: "#94a3b8", fontSize: 24, fontFamily: "monospace" }}
                 axisLine={{ stroke: "#334155" }}
                 tickLine={false}
-                interval="preserveStartEnd"
+                interval={0}
               />
               <YAxis
-                tick={{ fill: "#64748b", fontSize: 12, fontFamily: "monospace" }}
+                domain={yDomain}
+                tick={{ fill: "#94a3b8", fontSize: 24, fontFamily: "monospace" }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(val: number) => `$${val}`}
-                width={60}
+                tickFormatter={(val: number) => `$${val.toFixed(0)}`}
+                width={112}
               />
               <Tooltip content={<ChartTooltip />} />
               <Area

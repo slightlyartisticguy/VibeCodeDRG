@@ -132,3 +132,19 @@ export async function getHistoricalData(
     return cachedRows;
   }
 }
+
+/**
+ * Fetches ETF details including top holdings and sector breakdown.
+ * @param symbol ETF symbol (e.g., 'SPY')
+ */
+export async function getEtfDetails(symbol: string) {
+  try {
+    const result = await yahooFinance.quoteSummary(symbol, {
+      modules: ["topHoldings", "assetProfile", "defaultKeyStatistics"],
+    });
+    return result;
+  } catch (error) {
+    console.error(`Error fetching ETF details for ${symbol}:`, error);
+    throw error;
+  }
+}
