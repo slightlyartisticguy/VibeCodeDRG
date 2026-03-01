@@ -7,10 +7,12 @@ import { z } from "zod";
 export const PositionSchema = z.object({
   id: z.number().optional(),
   symbol: z.string().min(1).max(10),
+  portfolio_id: z.enum(["A", "B"]).default("A"),
   name: z.string().min(1),
   quantity: z.number().positive(),
-  avg_price: z.number().positive(),
-  asset_type: z.enum(["equity", "crypto", "bond", "cash"]),
+  avg_price: z.number().nonnegative(),
+  asset_type: z.enum(["equity", "crypto", "bond", "cash", "fund"]),
+  purchase_date: z.string().optional(),
 });
 
 export type Position = z.infer<typeof PositionSchema>;

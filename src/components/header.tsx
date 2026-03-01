@@ -70,7 +70,7 @@ export function Header({ onSymbolSelect }: HeaderProps) {
               ) : results.length > 0 ? (
                 <ul className="max-h-64 overflow-auto py-1">
                   {results.slice(0, 8).map((result: SearchResult) => (
-                    <li key={result.symbol}>
+                    <li key={`${result.symbol}-${result.name}`}>
                       <button
                         onClick={() => handleSelect(result)}
                         className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-800/50 transition-colors"

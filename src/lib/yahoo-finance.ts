@@ -4,9 +4,36 @@
  */
 import YahooFinance from "yahoo-finance2";
 import { getDb, isCacheFresh, updateCacheTimestamp } from "./db";
-import type { HistoricalPrice } from "./types";
+import type { HistoricalPrice, Quote } from "./types";
 
 const yahooFinance = new YahooFinance();
+const HISTORICAL_START_YEAR = 2006;
+
+function normalizeHistoricalPoints(
+  points: Array<{
+    date: Date;
+    open?: number | null;
+    high?: number | null;
+    low?: number | null;
+    close?: number | null;
+    volume?: number | null;
+  }>
+): HistoricalPrice[] {
+  return points
+    .filter((point) => point.date instanceof Date && !Number.isNaN(point.date.getTime()))
+    .filter((point) => typeof point.close === "number" && point.close > 0)
+    .map((point) => {
+      const close = point.close as number;
+      return {
+        date: point.date.toISOString().split("T")[0],
+        open: point.open ?? close,
+        high: point.high ?? close,
+        low: point.low ?? close,
+        close,
+        volume: point.volume ?? 0,
+      };
+    });
+}
 
 /**
  * Calculates the start date based on the time period.
@@ -21,7 +48,7 @@ function getStartDate(period: string): Date {
     case "1Y":
       return new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
     case "ALL":
-      return new Date(now.getFullYear() - 5, now.getMonth(), now.getDate());
+      return new Date(HISTORICAL_START_YEAR, 0, 1);
     default:
       return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
   }
@@ -69,6 +96,11 @@ export async function getHistoricalData(
       return [];
     }
 
+    const normalizedResult = normalizeHistoricalPoints(result);
+    if (normalizedResult.length === 0) {
+      return [];
+    }
+
     // Cache the results in SQLite
     const insertStmt = db.prepare(
       `INSERT OR REPLACE INTO historical_prices (symbol, date, open, high, low, close, volume)
@@ -76,45 +108,27 @@ export async function getHistoricalData(
     );
 
     const insertMany = db.transaction(
-      (
-        prices: Array<{
-          date: Date;
-          open?: number | null;
-          high?: number | null;
-          low?: number | null;
-          close?: number | null;
-          volume?: number | null;
-        }>
-      ) => {
+      (prices: HistoricalPrice[]) => {
         for (const price of prices) {
           insertStmt.run(
             symbol,
-            price.date.toISOString().split("T")[0],
-            price.open ?? 0,
-            price.high ?? 0,
-            price.low ?? 0,
-            price.close ?? 0,
+            price.date,
+            price.open,
+            price.high,
+            price.low,
+            price.close,
             price.volume ?? 0
           );
         }
       }
     );
 
-    insertMany(result);
+    insertMany(normalizedResult);
     updateCacheTimestamp(symbol, period);
 
     // Return filtered data for requested period
     const filterDate = getStartDate(period);
-    return result
-      .filter((r) => r.date >= filterDate)
-      .map((r) => ({
-        date: r.date.toISOString().split("T")[0],
-        open: r.open ?? 0,
-        high: r.high ?? 0,
-        low: r.low ?? 0,
-        close: r.close ?? 0,
-        volume: r.volume ?? 0,
-      }));
+    return normalizedResult.filter((point) => new Date(point.date) >= filterDate);
   } catch (error) {
     console.error(`Failed to fetch historical data for ${symbol}:`, error);
 
@@ -146,5 +160,98 @@ export async function getEtfDetails(symbol: string) {
   } catch (error) {
     console.error(`Error fetching ETF details for ${symbol}:`, error);
     throw error;
+  }
+}
+
+/**
+ * Fetch a real-time quote from Yahoo Finance. Used for instruments Finnhub does not cover (e.g., mutual funds).
+ */
+export async function getYahooQuote(symbol: string): Promise<Quote | null> {
+  try {
+    const quote = await yahooFinance.quote(symbol);
+    if (!quote) return null;
+
+    const currentPrice = quote.regularMarketPrice ?? quote.previousClose ?? null;
+    if (typeof currentPrice !== "number") return null;
+
+    const previousClose = quote.regularMarketPreviousClose ?? quote.previousClose ?? currentPrice;
+    const change = quote.regularMarketChange ?? (currentPrice - previousClose);
+    const percentChange =
+      quote.regularMarketChangePercent ??
+      (previousClose ? (change / previousClose) * 100 : 0);
+
+    return {
+      symbol,
+      currentPrice,
+      change,
+      percentChange,
+      highPrice: quote.regularMarketDayHigh ?? currentPrice,
+      lowPrice: quote.regularMarketDayLow ?? currentPrice,
+      openPrice: quote.regularMarketOpen ?? previousClose ?? currentPrice,
+      previousClose,
+    };
+  } catch (error) {
+    console.error(`Failed to fetch Yahoo Finance quote for ${symbol}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get the closing price of a symbol on a specific date.
+ * Falls back to the nearest prior trading day if the exact date isn't available.
+ * @param symbol - Stock ticker symbol
+ * @param date - ISO date string (YYYY-MM-DD)
+ */
+export async function getPriceOnDate(symbol: string, date: string): Promise<number | null> {
+  const db = getDb();
+
+  // Check cache first
+  const cached = db.prepare(
+    `SELECT close FROM historical_prices
+     WHERE symbol = ? AND date <= ?
+     ORDER BY date DESC LIMIT 1`
+  ).get(symbol, date) as { close: number } | undefined;
+
+  if (cached) return cached.close;
+
+  // Fetch full history (will cache it in SQLite)
+  await getHistoricalData(symbol, "ALL");
+
+  // Try cache again after fetching
+  const row = db.prepare(
+    `SELECT close FROM historical_prices
+     WHERE symbol = ? AND date <= ?
+     ORDER BY date DESC LIMIT 1`
+  ).get(symbol, date) as { close: number } | undefined;
+
+  return row?.close ?? null;
+}
+
+/**
+ * Search for mutual funds using Yahoo Finance search.
+ */
+export async function searchMutualFunds(query: string) {
+  try {
+    const results = await yahooFinance.search(query, {
+      quotesCount: 10,
+      newsCount: 0,
+    });
+
+    const seen = new Set<string>();
+    return (results.quotes ?? [])
+      .filter((quote) => quote.quoteType === "MUTUALFUND" && quote.symbol)
+      .map((quote) => ({
+        symbol: quote.symbol as string,
+        name: (quote.shortname || quote.longname || quote.symbol) as string,
+        type: "Mutual Fund",
+      }))
+      .filter((item) => {
+        if (seen.has(item.symbol)) return false;
+        seen.add(item.symbol);
+        return true;
+      });
+  } catch (error) {
+    console.error("Yahoo Finance mutual fund search failed:", error);
+    return [];
   }
 }

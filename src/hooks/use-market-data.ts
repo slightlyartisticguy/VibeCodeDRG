@@ -11,6 +11,15 @@ import type {
   ApiResponse,
 } from "@/lib/types";
 
+interface HistoricalDataResponse extends ApiResponse<HistoricalPrice[]> {
+  firstAvailableDate?: string | null;
+}
+
+export interface HistoricalDataResult {
+  prices: HistoricalPrice[];
+  firstAvailableDate: string | null;
+}
+
 /**
  * Fetch a single stock quote.
  */
@@ -48,14 +57,18 @@ export function useMultipleQuotes(symbols: string[]) {
  * Fetch historical price data for a symbol.
  */
 export function useHistoricalData(symbol: string, period: string = "6M") {
-  return useQuery<HistoricalPrice[]>({
+  return useQuery<HistoricalDataResult>({
     queryKey: ["historical", symbol, period],
     queryFn: async () => {
       const res = await fetch(
         `/api/historical?symbol=${symbol}&period=${period}`
       );
-      const json: ApiResponse<HistoricalPrice[]> = await res.json();
-      return json.data ?? [];
+      const json: HistoricalDataResponse = await res.json();
+      const prices = json.data ?? [];
+      return {
+        prices,
+        firstAvailableDate: json.firstAvailableDate ?? prices[0]?.date ?? null,
+      };
     },
     enabled: !!symbol,
   });
@@ -77,13 +90,13 @@ export function useMarkets() {
 }
 
 /**
- * Fetch all portfolio positions.
+ * Fetch all portfolio positions for a given portfolio (A or B).
  */
-export function usePositions() {
+export function usePositions(portfolioId: "A" | "B" = "A") {
   return useQuery<Position[]>({
-    queryKey: ["positions"],
+    queryKey: ["positions", portfolioId],
     queryFn: async () => {
-      const res = await fetch("/api/positions");
+      const res = await fetch(`/api/positions?portfolio=${portfolioId}`);
       const json: ApiResponse<Position[]> = await res.json();
       return json.data ?? [];
     },
@@ -93,7 +106,7 @@ export function usePositions() {
 /**
  * Add or update a portfolio position.
  */
-export function useAddPosition() {
+export function useAddPosition(portfolioId: "A" | "B" = "A") {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -107,7 +120,33 @@ export function useAddPosition() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["positions"] });
+      queryClient.invalidateQueries({ queryKey: ["positions", portfolioId] });
+    },
+  });
+}
+
+/**
+ * Update quantity / purchase_date of an existing position.
+ */
+export function useUpdatePosition(portfolioId: "A" | "B" = "A") {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      symbol: string;
+      quantity?: number;
+      purchase_date?: string;
+    }) => {
+      const res = await fetch("/api/positions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, portfolio_id: portfolioId }),
+      });
+      if (!res.ok) throw new Error("Failed to update position");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["positions", portfolioId] });
     },
   });
 }
@@ -115,20 +154,53 @@ export function useAddPosition() {
 /**
  * Remove a portfolio position.
  */
-export function useDeletePosition() {
+export function useDeletePosition(portfolioId: "A" | "B" = "A") {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (symbol: string) => {
-      const res = await fetch(`/api/positions?symbol=${symbol}`, {
+      const res = await fetch(`/api/positions?symbol=${symbol}&portfolio=${portfolioId}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete position");
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["positions"] });
+      queryClient.invalidateQueries({ queryKey: ["positions", portfolioId] });
     },
+  });
+}
+
+/**
+ * Fetch portfolio value history normalised to $10,000 invested.
+ */
+export interface PortfolioHistoryPoint {
+  date: string;
+  value: number;
+}
+
+export interface PortfolioHistoryResult {
+  data: PortfolioHistoryPoint[];
+  firstAvailableDate: string | null;
+}
+
+export function usePortfolioHistory(
+  portfolioId: "A" | "B" | undefined,
+  period: string
+) {
+  return useQuery<PortfolioHistoryResult>({
+    queryKey: ["portfolio-history", portfolioId, period],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/portfolio-history?portfolio=${portfolioId}&period=${period}`
+      );
+      const json = await res.json();
+      return {
+        data: json.data ?? [],
+        firstAvailableDate: json.firstAvailableDate ?? null,
+      };
+    },
+    enabled: !!portfolioId,
   });
 }
 
