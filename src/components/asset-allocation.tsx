@@ -16,6 +16,7 @@ const ASSET_COLORS: Record<string, string> = {
   crypto: "#22c55e",   // Green
   bond: "#f59e0b",     // Amber
   cash: "#ef4444",     // Red
+  fund: "#a855f7",     // Purple
 };
 
 const ASSET_LABELS: Record<string, string> = {
@@ -23,6 +24,7 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: "Crypto",
   bond: "Bonds",
   cash: "Cash",
+  fund: "Mutual Funds",
 };
 
 interface AssetAllocationProps {

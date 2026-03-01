@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { 
-  LayoutDashboard, 
-  BarChart3, 
-  ChevronLeft, 
+import {
+  LayoutDashboard,
+  BarChart3,
+  ChevronLeft,
   ChevronRight,
   Settings,
-  PieChart
+  PieChart,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useClearCache } from "@/hooks/use-clear-cache";
 
 interface SidebarProps {
   className?: string;
@@ -20,10 +22,12 @@ interface SidebarProps {
 export function Sidebar({ className }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
+  const clearCacheMutation = useClearCache();
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
   };
+
 
   const navItems = [
     {
@@ -104,24 +108,42 @@ export function Sidebar({ className }: SidebarProps) {
         })}
       </nav>
 
-      <div className="border-t border-slate-800 p-4">
-        {!isCollapsed ? (
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
-              US
+      <div className="mt-auto">
+        <div className="border-t border-slate-800 p-4">
+          <button
+            onClick={() => clearCacheMutation.mutate()}
+            disabled={clearCacheMutation.isPending}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg p-3 text-slate-400 transition-colors hover:bg-slate-800/50 hover:text-white",
+              isCollapsed ? "justify-center" : ""
+            )}
+          >
+            <Trash2 className="h-5 w-5 flex-shrink-0" />
+            {!isCollapsed && (
+              <span className="text-sm font-medium">Clear Cache</span>
+            )}
+          </button>
+        </div>
+
+        <div className="border-t border-slate-800 p-4">
+          {!isCollapsed ? (
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+                US
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-white">User</span>
+                <span className="text-xs text-slate-400">user@example.com</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-white">User</span>
-              <span className="text-xs text-slate-400">user@example.com</span>
+          ) : (
+            <div className="flex justify-center">
+              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+                US
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex justify-center">
-            <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
-              US
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

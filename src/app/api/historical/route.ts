@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
       symbol.toUpperCase(),
       period.toUpperCase()
     );
-    return NextResponse.json({ data });
+    const firstAvailableDate = data[0]?.date ?? null;
+    return NextResponse.json({ data, firstAvailableDate });
   } catch (error) {
     console.error("Historical data API error:", error);
     return NextResponse.json(

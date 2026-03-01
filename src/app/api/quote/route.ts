@@ -5,6 +5,24 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getQuote, getMultipleQuotes } from "@/lib/finnhub";
+import { getYahooQuote } from "@/lib/yahoo-finance";
+
+async function fetchQuoteWithFallback(symbol: string) {
+  const finnhubQuote = await getQuote(symbol);
+  if (finnhubQuote) return finnhubQuote;
+  return getYahooQuote(symbol);
+}
+
+async function fetchMultipleQuotesWithFallback(symbols: string[]) {
+  const finnhubQuotes = await getMultipleQuotes(symbols);
+  const results: Record<string, Awaited<ReturnType<typeof fetchQuoteWithFallback>>> = {};
+
+  for (const symbol of symbols) {
+    results[symbol] = finnhubQuotes[symbol] ?? (await getYahooQuote(symbol));
+  }
+
+  return results;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -14,12 +32,12 @@ export async function GET(request: NextRequest) {
   try {
     if (symbols) {
       const symbolList = symbols.split(",").map((s) => s.trim().toUpperCase());
-      const quotes = await getMultipleQuotes(symbolList);
+      const quotes = await fetchMultipleQuotesWithFallback(symbolList);
       return NextResponse.json({ data: quotes });
     }
 
     if (symbol) {
-      const quote = await getQuote(symbol.toUpperCase());
+      const quote = await fetchQuoteWithFallback(symbol.toUpperCase());
       if (!quote) {
         return NextResponse.json(
           { error: "Failed to fetch quote. API may be rate limited." },

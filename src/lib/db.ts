@@ -66,6 +66,52 @@ function initializeDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_historical_symbol_date 
       ON historical_prices(symbol, date);
   `);
+
+  // Migration: add purchase_date column to positions if it doesn't already exist
+  try {
+    db.exec(`ALTER TABLE positions ADD COLUMN purchase_date TEXT`);
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
+  // Migration: add portfolio_id support — recreate table with UNIQUE(symbol, portfolio_id)
+  // so the same symbol can be held in multiple portfolios independently.
+  const hasPortfolioId = db
+    .prepare("SELECT name FROM pragma_table_info('positions') WHERE name='portfolio_id'")
+    .get();
+
+  if (!hasPortfolioId) {
+    const migrate = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS positions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          symbol TEXT NOT NULL,
+          portfolio_id TEXT NOT NULL DEFAULT 'A',
+          name TEXT NOT NULL,
+          quantity REAL NOT NULL DEFAULT 0,
+          avg_price REAL NOT NULL DEFAULT 0,
+          asset_type TEXT NOT NULL DEFAULT 'equity',
+          purchase_date TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(symbol, portfolio_id)
+        );
+      `);
+
+      db.exec(`
+        INSERT INTO positions_new
+          (id, symbol, portfolio_id, name, quantity, avg_price, asset_type, purchase_date, created_at, updated_at)
+        SELECT
+          id, symbol, 'A', name, quantity, avg_price, asset_type,
+          purchase_date, created_at, updated_at
+        FROM positions;
+      `);
+
+      db.exec(`DROP TABLE positions;`);
+      db.exec(`ALTER TABLE positions_new RENAME TO positions;`);
+    });
+    migrate();
+  }
 }
 
 /**
@@ -94,4 +140,15 @@ export function updateCacheTimestamp(symbol: string, period: string): void {
     `INSERT OR REPLACE INTO cache_metadata (symbol, last_fetched, period) 
      VALUES (?, datetime('now'), ?)`
   ).run(symbol, period);
+}
+
+/**
+ * Drops all data from cache tables to force a refresh.
+ */
+export function clearCache(): void {
+  const db = getDb();
+  db.exec(`
+    DELETE FROM historical_prices;
+    DELETE FROM cache_metadata;
+  `);
 }
