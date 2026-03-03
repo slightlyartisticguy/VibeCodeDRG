@@ -75,6 +75,22 @@ export function useHistoricalData(symbol: string, period: string = "6M") {
 }
 
 /**
+ * Fetch the closing price of a symbol on or near a specific date.
+ */
+export function usePriceAtDate(symbol: string | null, date: string | null) {
+  return useQuery<{ price: number; date: string } | null>({
+    queryKey: ["price-at-date", symbol, date],
+    queryFn: async () => {
+      const res = await fetch(`/api/price-at-date?symbol=${symbol}&date=${date}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!symbol && !!date,
+    staleTime: 1000 * 60 * 60, // 1 hour
+  });
+}
+
+/**
  * Fetch major market indices.
  */
 export function useMarkets() {

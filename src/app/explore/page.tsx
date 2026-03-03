@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Header } from "@/components/header";
 import { PerformanceChart } from "@/components/performance-chart";
 import { ExploreMarketOverview } from "@/components/explore-market-overview";
+import { ExploreAssets } from "@/components/explore-assets";
 
 export default function ExplorePage() {
   const [selectedSymbol, setSelectedSymbol] = useState("SPY");
@@ -37,6 +38,11 @@ export default function ExplorePage() {
                 onMarketSelect={handleSymbolSelect} 
                 selectedSymbol={selectedSymbol}
             />
+          </div>
+
+          {/* Explore Assets — curated year/sector/market groups */}
+          <div className="pt-2 px-4 lg:px-8">
+            <ExploreAssets />
           </div>
         </div>
       </main>

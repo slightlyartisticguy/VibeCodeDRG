@@ -40,11 +40,10 @@ export function Sidebar({ className }: SidebarProps) {
       href: "/explore",
       icon: BarChart3,
     },
-     // Added for completeness based on typical app structure
     {
-      title: "Portfolio",
-      href: "/portfolio", 
-      icon: PieChart,
+      title: "Simulation",
+      href: "/simulation",
+      icon: PieChart, // Or another icon like `Cpu`
     },
     {
         title: "Settings",

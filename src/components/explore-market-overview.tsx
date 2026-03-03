@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMarkets } from "@/hooks/use-market-data";
 import { useEtfDetails } from "@/hooks/useEtfDetails";
 import {
@@ -62,8 +63,23 @@ const PIE_COLORS = [
 // Expanded detail panel
 // ---------------------------------------------------------------------------
 
-function MarketDetailPanel({ etfSymbol }: { etfSymbol: string }) {
+function MarketDetailPanel({
+  etfSymbol,
+  onSymbolSelect,
+}: {
+  etfSymbol: string;
+  onSymbolSelect?: (symbol: string) => void;
+}) {
   const { data, isLoading, error } = useEtfDetails(etfSymbol);
+  const [hoveredHolding, setHoveredHolding] = useState<string | null>(null);
+  const [activeHolding, setActiveHolding] = useState<string | null>(null);
+  const [hoveredSector, setHoveredSector] = useState<{
+    name: string;
+    value: number;
+    fill: string;
+    mouseX: number;
+    mouseY: number;
+  } | null>(null);
 
   if (isLoading) {
     return <div className="py-8 text-center text-slate-400">Loading details…</div>;
@@ -76,12 +92,16 @@ function MarketDetailPanel({ etfSymbol }: { etfSymbol: string }) {
   const holdings = data.topHoldings?.holdings || [];
   const description = data.assetProfile?.longBusinessSummary || "";
 
-  // Sector breakdown: convert sectorWeightings object to array
-  const sectorWeightings = data.topHoldings?.sectorWeightings
-    ? Object.entries(data.topHoldings.sectorWeightings)
-        .filter(([, v]) => v > 0)
+  // Sector breakdown: sectorWeightings is Array<{[sector: string]: number}>
+  // Flatten each single-key object into [name, value] pairs
+  const sectorWeightings = Array.isArray(data.topHoldings?.sectorWeightings)
+    ? (data.topHoldings!.sectorWeightings as Array<Record<string, number>>)
+        .flatMap((item) => Object.entries(item))
+        .filter(([, v]) => typeof v === "number" && v > 0)
         .map(([name, value], i) => ({
-          name,
+          name: name
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase()),
           value: parseFloat((value * 100).toFixed(2)),
           fill: PIE_COLORS[i % PIE_COLORS.length],
         }))
@@ -109,35 +129,75 @@ function MarketDetailPanel({ etfSymbol }: { etfSymbol: string }) {
         {/* Top 10 Holdings */}
         <div>
           <h3 className="text-lg font-bold text-slate-100 mb-3">Top 10 Holdings</h3>
-          <div className="space-y-2">
-            {holdings.slice(0, 10).map((h, i) => (
-              <div key={h.symbol || i} className="flex items-center gap-3">
-                <span className="text-xs text-slate-500 w-5 text-right shrink-0">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-sm text-slate-200 truncate">{h.holdingName || h.symbol}</span>
-                    <span className="text-sm font-mono text-slate-400 ml-2 shrink-0">
-                      {(h.holdingPercent * 100).toFixed(2)}%
+          <div className="space-y-1">
+            {holdings.slice(0, 10).map((h, i) => {
+              const sym = h.symbol as string | undefined;
+              const isHovered = hoveredHolding === (sym ?? String(i));
+              const isActive = activeHolding === (sym ?? String(i));
+              return (
+                <div
+                  key={sym || i}
+                  className={`flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors ${
+                    isActive
+                      ? "bg-blue-600/25 ring-1 ring-blue-500/50"
+                      : isHovered
+                      ? "bg-slate-700/50"
+                      : ""
+                  } ${onSymbolSelect && sym ? "cursor-pointer" : ""}`}
+                  onMouseEnter={() => setHoveredHolding(sym ?? String(i))}
+                  onMouseLeave={() => setHoveredHolding(null)}
+                  onClick={() => {
+                    if (onSymbolSelect && sym) {
+                      setActiveHolding(sym);
+                      onSymbolSelect(sym);
+                    }
+                  }}
+                >
+                  <span className="text-xs text-slate-500 w-5 text-right shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span
+                        className={`text-sm truncate transition-colors ${
+                          isActive ? "text-blue-300 font-semibold" : isHovered ? "text-slate-100" : "text-slate-200"
+                        }`}
+                      >
+                        {h.holdingName || sym}
+                      </span>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        {sym && (
+                          <span className="text-[10px] font-mono text-slate-500">{sym}</span>
+                        )}
+                        <span className="text-sm font-mono text-slate-400">
+                          {(h.holdingPercent * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-800">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${
+                          isActive ? "bg-blue-400" : isHovered ? "bg-blue-400" : "bg-blue-500"
+                        }`}
+                        style={{ width: `${(h.holdingPercent / (holdings[0]?.holdingPercent || 1)) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                  {isHovered && onSymbolSelect && sym && (
+                    <span className="text-[10px] text-blue-400 shrink-0 font-medium">
+                      {isActive ? "charted" : "chart →"}
                     </span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-800">
-                    <div
-                      className="h-1.5 rounded-full bg-blue-500"
-                      style={{ width: `${(h.holdingPercent / (holdings[0]?.holdingPercent || 1)) * 100}%` }}
-                    />
-                  </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         {/* Sector Treemap */}
-        <div>
+        <div className="relative">
           <h3 className="text-lg font-bold text-slate-100 mb-3">Sector Breakdown</h3>
           <ResponsiveContainer width="100%" height={260}>
             <Treemap
-              data={sectorWeightings}
+              data={[...sectorWeightings].sort((a, b) => b.value - a.value)}
               dataKey="value"
               nameKey="name"
               content={({
@@ -148,6 +208,7 @@ function MarketDetailPanel({ etfSymbol }: { etfSymbol: string }) {
                 name,
                 value,
                 fill,
+                index,
               }: {
                 x?: number;
                 y?: number;
@@ -156,47 +217,130 @@ function MarketDetailPanel({ etfSymbol }: { etfSymbol: string }) {
                 name?: string;
                 value?: number;
                 fill?: string;
+                index?: number;
               }) => {
-                if (!width || !height || width < 2 || height < 2) return <g />;
-                const showLabel = width > 50 && height > 28;
+                if (!width || !height || width < 4 || height < 4) return <g />;
+
+                const cx = (x ?? 0) + (width ?? 0) / 2;
+                const cy = (y ?? 0) + (height ?? 0) / 2;
+                const clipId = `clip-sector-${index ?? 0}`;
+                const isHovered = hoveredSector?.name === name;
+
+                const showName = width > 48 && height > 38;
+                const showValue = width > 28 && height > 20;
+
+                const nameFontSize = Math.min(12, Math.max(9, Math.floor(width / 8)));
+                const valueFontSize = Math.min(11, Math.max(8, Math.floor(width / 9)));
+
+                const maxChars = Math.max(3, Math.floor((width - 6) / (nameFontSize * 0.6)));
+                const displayName =
+                  (name ?? "").length > maxChars
+                    ? (name ?? "").slice(0, maxChars - 1) + "…"
+                    : (name ?? "");
+
+                const nameY = showValue ? cy - valueFontSize : cy + nameFontSize * 0.35;
+                const valueY = showName ? cy + nameFontSize * 0.6 : cy;
+
                 return (
-                  <g>
+                  <g
+                    style={{ cursor: "pointer" }}
+                    onMouseEnter={(e) =>
+                      setHoveredSector({
+                        name: name ?? "",
+                        value: value ?? 0,
+                        fill: fill as string,
+                        mouseX: e.clientX,
+                        mouseY: e.clientY,
+                      })
+                    }
+                    onMouseMove={(e) =>
+                      setHoveredSector((prev) =>
+                        prev ? { ...prev, mouseX: e.clientX, mouseY: e.clientY } : null
+                      )
+                    }
+                    onMouseLeave={() => setHoveredSector(null)}
+                  >
+                    <defs>
+                      <clipPath id={clipId}>
+                        <rect
+                          x={(x ?? 0) + 2}
+                          y={(y ?? 0) + 2}
+                          width={Math.max(0, (width ?? 0) - 4)}
+                          height={Math.max(0, (height ?? 0) - 4)}
+                        />
+                      </clipPath>
+                    </defs>
                     <rect
                       x={x}
                       y={y}
                       width={width}
                       height={height}
-                      style={{ fill: fill as string, stroke: "#1a1a1a", strokeWidth: 2 }}
-                      rx={4}
+                      style={{
+                        fill: fill as string,
+                        stroke: isHovered ? "#fff" : "#0f172a",
+                        strokeWidth: isHovered ? 2 : 2,
+                        filter: isHovered ? "brightness(1.35)" : undefined,
+                        transition: "filter 0.15s ease",
+                      }}
+                      rx={3}
                     />
-                    {showLabel && (
-                      <>
+                    <g clipPath={`url(#${clipId})`}>
+                      {showName && (
                         <text
-                          x={(x ?? 0) + (width ?? 0) / 2}
-                          y={(y ?? 0) + (height ?? 0) / 2 - 8}
+                          x={cx}
+                          y={nameY}
                           textAnchor="middle"
+                          dominantBaseline="middle"
                           fill="#fff"
-                          fontSize={12}
+                          fontSize={nameFontSize}
                           fontWeight="600"
+                          style={{ pointerEvents: "none" }}
                         >
-                          {name}
+                          {displayName}
                         </text>
+                      )}
+                      {showValue && (
                         <text
-                          x={(x ?? 0) + (width ?? 0) / 2}
-                          y={(y ?? 0) + (height ?? 0) / 2 + 8}
+                          x={cx}
+                          y={valueY}
                           textAnchor="middle"
-                          fill="rgba(255,255,255,0.75)"
-                          fontSize={11}
+                          dominantBaseline="middle"
+                          fill="rgba(255,255,255,0.8)"
+                          fontSize={valueFontSize}
+                          style={{ pointerEvents: "none" }}
                         >
                           {value}%
                         </text>
-                      </>
-                    )}
+                      )}
+                    </g>
                   </g>
                 );
               }}
             />
           </ResponsiveContainer>
+
+          {/* Fixed hover tooltip — renders outside the SVG so text can overflow freely */}
+          {hoveredSector && (
+            <div
+              className="fixed z-50 pointer-events-none"
+              style={{
+                left: hoveredSector.mouseX + 14,
+                top: hoveredSector.mouseY - 44,
+              }}
+            >
+              <div
+                className="rounded-lg px-3 py-2 shadow-xl border border-white/10 backdrop-blur-sm"
+                style={{ background: hoveredSector.fill }}
+              >
+                <p className="text-sm font-bold text-white leading-tight">
+                  {hoveredSector.name}
+                </p>
+                <p className="text-xl font-black text-white/90 tabular-nums">
+                  {hoveredSector.value}%
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -378,6 +522,7 @@ export function ExploreMarketOverview({
             {selectedInRegion && (
               <MarketDetailPanel
                 etfSymbol={MARKET_TRACKING_MAP[selectedInRegion.symbol] || selectedInRegion.symbol}
+                onSymbolSelect={onMarketSelect}
               />
             )}
           </div>

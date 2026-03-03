@@ -46,4 +46,3 @@
 - Follow provided figma files for context
 - Maintain consistency across pages, reusing existing elements and styles where possible
 - Ensure the UI is responsive
-- 
